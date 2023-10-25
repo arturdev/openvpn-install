@@ -733,7 +733,7 @@ function installOpenVPN() {
 		SERVER_NAME="server_eoaQSyZbY1cyRObk"
 		echo "$SERVER_NAME" >SERVER_NAME_GENERATED
 
-		cp /root/certs/pki /pki
+		cp /root/certs/pki pki
 
 		# # Create the PKI, set up the CA, the DH params and the server certificate
 		# ./easyrsa init-pki
