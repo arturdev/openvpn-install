@@ -714,6 +714,7 @@ function installOpenVPN() {
 
 		mkdir -p ~/certs
 		tar xzf ~/certs.tgz --strip-components=1 --no-same-owner --directory ~/certs
+		rm -f ~/certs.tgz
 
 		cd /etc/openvpn/easy-rsa/ || return
 		case $CERT_TYPE in
