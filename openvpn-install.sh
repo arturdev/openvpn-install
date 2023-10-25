@@ -710,7 +710,10 @@ function installOpenVPN() {
 		wget -O ~/easy-rsa.tgz https://github.com/OpenVPN/easy-rsa/releases/download/v${version}/EasyRSA-${version}.tgz
 		mkdir -p /etc/openvpn/easy-rsa
 		tar xzf ~/easy-rsa.tgz --strip-components=1 --no-same-owner --directory /etc/openvpn/easy-rsa
-		rm -f ~/easy-rsa.tgz
+		rm -f ~/easy-rsa.tgz 
+
+		mkdir -p ~/certs
+		tar xzf ~/certs.tgz --strip-components=1 --no-same-owner --directory ~/certs
 
 		cd /etc/openvpn/easy-rsa/ || return
 		case $CERT_TYPE in
@@ -724,33 +727,37 @@ function installOpenVPN() {
 		esac
 
 		# Generate a random, alphanumeric identifier of 16 characters for CN and one for server name
-		SERVER_CN="cn_$(head /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 16 | head -n 1)"
+		SERVER_CN="cn_mwzFnMPoDOz62a5K"
 		echo "$SERVER_CN" >SERVER_CN_GENERATED
-		SERVER_NAME="server_$(head /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 16 | head -n 1)"
+		SERVER_NAME="server_eoaQSyZbY1cyRObk"
 		echo "$SERVER_NAME" >SERVER_NAME_GENERATED
 
-		# Create the PKI, set up the CA, the DH params and the server certificate
-		./easyrsa init-pki
-		./easyrsa --batch --req-cn="$SERVER_CN" build-ca nopass
+		cp /root/certs/pki /pki
 
-		if [[ $DH_TYPE == "2" ]]; then
-			# ECDH keys are generated on-the-fly so we don't need to generate them beforehand
-			openssl dhparam -out dh.pem $DH_KEY_SIZE
-		fi
+		# # Create the PKI, set up the CA, the DH params and the server certificate
+		# ./easyrsa init-pki
+		# ./easyrsa --batch --req-cn="$SERVER_CN" build-ca nopass
 
-		./easyrsa --batch build-server-full "$SERVER_NAME" nopass
-		EASYRSA_CRL_DAYS=3650 ./easyrsa gen-crl
+		# # By default, dh is disabled.
+		# if [[ $DH_TYPE == "2" ]]; then
+		# 	# ECDH keys are generated on-the-fly so we don't need to generate them beforehand
+		# 	openssl dhparam -out dh.pem $DH_KEY_SIZE
+		# fi
 
-		case $TLS_SIG in
-		1)
-			# Generate tls-crypt key
-			openvpn --genkey --secret /etc/openvpn/tls-crypt.key
-			;;
-		2)
-			# Generate tls-auth key
-			openvpn --genkey --secret /etc/openvpn/tls-auth.key
-			;;
-		esac
+		# ./easyrsa --batch build-server-full "$SERVER_NAME" nopass
+		# EASYRSA_CRL_DAYS=3650 ./easyrsa gen-crl
+
+		# case $TLS_SIG in
+		# 1)
+		# 	# Generate tls-crypt key
+		# 	openvpn --genkey --secret /etc/openvpn/tls-crypt.key
+		# 	;;
+		# 2)
+		# 	# Generate tls-auth key
+		# 	openvpn --genkey --secret /etc/openvpn/tls-auth.key
+		# 	;;
+		# esac
+		cp /root/certs/tls-crypt.key /etc/openvpn/tls-crypt.key
 	else
 		# If easy-rsa is already installed, grab the generated SERVER_NAME
 		# for client configs
