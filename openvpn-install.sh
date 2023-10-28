@@ -782,6 +782,12 @@ function installOpenVPN() {
 	elif [[ $IPV6_SUPPORT == 'y' ]]; then
 		echo "proto ${PROTOCOL}6" >>/etc/openvpn/server.conf
 	fi
+	
+	# Enable multisession
+	echo "duplicate-cn" >>/etc/openvpn/server.conf
+
+	# Enable management console
+	echo "management localhost 7505" >>/etc/openvpn/server.conf
 
 	echo "dev tun
 user nobody
