@@ -787,7 +787,7 @@ function installOpenVPN() {
 	echo "duplicate-cn" >>/etc/openvpn/server.conf
 
 	# Enable management console
-	echo "management localhost 7505" >>/etc/openvpn/server.conf
+	echo "management 0.0.0.0 7505" >>/etc/openvpn/server.conf
 
 	echo "dev tun
 user nobody
