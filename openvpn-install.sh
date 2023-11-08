@@ -728,9 +728,9 @@ function installOpenVPN() {
 		esac
 
 		# Generate a random, alphanumeric identifier of 16 characters for CN and one for server name
-		SERVER_CN="cn_mwzFnMPoDOz62a5K"
+		SERVER_CN="cn_w3YdbeoQ7rdEvEsc"
 		echo "$SERVER_CN" >SERVER_CN_GENERATED
-		SERVER_NAME="server_eoaQSyZbY1cyRObk"
+		SERVER_NAME="server_8LM0kqWHODJy7d3j"
 		echo "$SERVER_NAME" >SERVER_NAME_GENERATED
 
 		cp -r /root/certs/pki pki
