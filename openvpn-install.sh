@@ -786,6 +786,10 @@ function installOpenVPN() {
 	# Enable multisession
 	echo "duplicate-cn" >>/etc/openvpn/server.conf
 
+    # Enable auth
+    echo "script-security 2" >>/etc/openvpn/server.conf
+    echo "auth-user-pass-verify \"/etc/openvpn/custom-scripts/client-connect.sh\" via-env" >>/etc/openvpn/server.conf
+
 	# Enable management console
 	echo "management 0.0.0.0 7505" >>/etc/openvpn/server.conf
 
@@ -961,6 +965,7 @@ verb 3" >>/etc/openvpn/server.conf
 
 		# Workaround to fix OpenVPN service on OpenVZ
 		sed -i 's|LimitNPROC|#LimitNPROC|' /etc/systemd/system/openvpn\@.service
+        sed -i 's|PrivateTmp=true|#PrivateTmp=false|' /etc/systemd/system/openvpn\@.service
 		# Another workaround to keep using /etc/openvpn/
 		sed -i 's|/etc/openvpn/server|/etc/openvpn|' /etc/systemd/system/openvpn\@.service
 
