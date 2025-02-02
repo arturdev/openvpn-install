@@ -808,7 +808,7 @@ ifconfig-pool-persist ipp.txt" >>/etc/openvpn/server.conf
 	1) # Current system resolvers
 		# Locate the proper resolv.conf
 		# Needed for systems running systemd-resolved
-		if grep -q "127.0.0.53" "/etc/resolv.conf"; then
+		if grep -q "127.0.0.53" "/etc/resolv.conf" && [ -f /run/systemd/resolve/resolv.conf ]; then
 			RESOLVCONF='/run/systemd/resolve/resolv.conf'
 		else
 			RESOLVCONF='/etc/resolv.conf'
