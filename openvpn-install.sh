@@ -57,7 +57,7 @@ function checkOS() {
 		fi
 		if [[ $ID == "centos" || $ID == "rocky" || $ID == "almalinux" ]]; then
 			OS="centos"
-			if [[ $VERSION_ID -lt 7 ]]; then
+			if [[ ${VERSION_ID%.*} -lt 7 ]]; then
 				echo "⚠️ Your version of CentOS is not supported."
 				echo ""
 				echo "The script only support CentOS 7 and CentOS 8."
@@ -216,6 +216,45 @@ access-control: fd42:42:42:42::/112 allow' >>/etc/unbound/openvpn.conf
 	systemctl restart unbound
 }
 
+function resolvePublicIP() {
+	# IP version flags, we'll use as default the IPv4
+	CURL_IP_VERSION_FLAG="-4"
+	DIG_IP_VERSION_FLAG="-4"
+
+	# Behind NAT, we'll default to the publicly reachable IPv4/IPv6.
+	if [[ $IPV6_SUPPORT == "y" ]]; then
+		CURL_IP_VERSION_FLAG=""
+		DIG_IP_VERSION_FLAG="-6"
+	fi
+
+	# If there is no public ip yet, we'll try to solve it using: https://api.seeip.org
+	if [[ -z $PUBLIC_IP ]]; then
+		PUBLIC_IP=$(curl -f -m 5 -sS --retry 2 --retry-connrefused "$CURL_IP_VERSION_FLAG" https://api.seeip.org 2>/dev/null)
+	fi
+
+	# If there is no public ip yet, we'll try to solve it using: https://ifconfig.me
+	if [[ -z $PUBLIC_IP ]]; then
+		PUBLIC_IP=$(curl -f -m 5 -sS --retry 2 --retry-connrefused "$CURL_IP_VERSION_FLAG" https://ifconfig.me 2>/dev/null)
+	fi
+
+	# If there is no public ip yet, we'll try to solve it using: https://api.ipify.org
+	if [[ -z $PUBLIC_IP ]]; then
+		PUBLIC_IP=$(curl -f -m 5 -sS --retry 2 --retry-connrefused "$CURL_IP_VERSION_FLAG" https://api.ipify.org 2>/dev/null)
+	fi
+
+	# If there is no public ip yet, we'll try to solve it using: ns1.google.com
+	if [[ -z $PUBLIC_IP ]]; then
+		PUBLIC_IP=$(dig $DIG_IP_VERSION_FLAG TXT +short o-o.myaddr.l.google.com @ns1.google.com | tr -d '"')
+	fi
+
+	if [[ -z $PUBLIC_IP ]]; then
+		echo >&2 echo "Couldn't solve the public IP"
+		exit 1
+	fi
+
+	echo "$PUBLIC_IP"
+}
+
 function installQuestions() {
 	echo "Welcome to the OpenVPN installer!"
 	echo "The git repository is available at: https://github.com/angristan/openvpn-install"
@@ -238,15 +277,18 @@ function installQuestions() {
 	if [[ $APPROVE_IP =~ n ]]; then
 		read -rp "IP address: " -e -i "$IP" IP
 	fi
-	# If $IP is a private IP address, the server must be behind NAT
+	# If $IP is a private IP address, the server must be behind NAT
 	if echo "$IP" | grep -qE '^(10\.|172\.1[6789]\.|172\.2[0-9]\.|172\.3[01]\.|192\.168)'; then
 		echo ""
 		echo "It seems this server is behind NAT. What is its public IPv4 address or hostname?"
 		echo "We need it for the clients to connect to the server."
 
-		PUBLICIP=$(curl -s https://api.ipify.org)
+		if [[ -z $ENDPOINT ]]; then
+			DEFAULT_ENDPOINT=$(resolvePublicIP)
+		fi
+
 		until [[ $ENDPOINT != "" ]]; do
-			read -rp "Public IPv4 address or hostname: " -e -i "$PUBLICIP" ENDPOINT
+			read -rp "Public IPv4 address or hostname: " -e -i "$DEFAULT_ENDPOINT" ENDPOINT
 		done
 	fi
 
@@ -625,17 +667,9 @@ function installOpenVPN() {
 		PASS=${PASS:-1}
 		CONTINUE=${CONTINUE:-y}
 
-		# Behind NAT, we'll default to the publicly reachable IPv4/IPv6.
-		if [[ $IPV6_SUPPORT == "y" ]]; then
-			if ! PUBLIC_IP=$(curl -f --retry 5 --retry-connrefused https://api.seeip.org); then
-				PUBLIC_IP=$(dig -6 TXT +short o-o.myaddr.l.google.com @ns1.google.com | tr -d '"')
-			fi
-		else
-			if ! PUBLIC_IP=$(curl -f --retry 5 --retry-connrefused -4 https://api.seeip.org); then
-				PUBLIC_IP=$(dig -4 TXT +short o-o.myaddr.l.google.com @ns1.google.com | tr -d '"')
-			fi
+		if [[ -z $ENDPOINT ]]; then
+			ENDPOINT=$(resolvePublicIP)
 		fi
-		ENDPOINT=${ENDPOINT:-$PUBLIC_IP}
 	fi
 
 	# Run setup questions first, and set other variables if auto-install
@@ -716,11 +750,7 @@ function installOpenVPN() {
 		wget -O ~/easy-rsa.tgz https://github.com/OpenVPN/easy-rsa/releases/download/v${version}/EasyRSA-${version}.tgz
 		mkdir -p /etc/openvpn/easy-rsa
 		tar xzf ~/easy-rsa.tgz --strip-components=1 --no-same-owner --directory /etc/openvpn/easy-rsa
-		rm -f ~/easy-rsa.tgz 
-
-		mkdir -p ~/certs
-		tar xzf ~/certs.tgz --strip-components=1 --no-same-owner --directory ~/certs
-		rm -f ~/certs.tgz
+		rm -f ~/easy-rsa.tgz
 
 		cd /etc/openvpn/easy-rsa/ || return
 		case $CERT_TYPE in
@@ -734,37 +764,33 @@ function installOpenVPN() {
 		esac
 
 		# Generate a random, alphanumeric identifier of 16 characters for CN and one for server name
-		SERVER_CN="cn_mwzFnMPoDOz62a5K"
+		SERVER_CN="cn_$(head /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 16 | head -n 1)"
 		echo "$SERVER_CN" >SERVER_CN_GENERATED
-		SERVER_NAME="server_eoaQSyZbY1cyRObk"
+		SERVER_NAME="server_$(head /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 16 | head -n 1)"
 		echo "$SERVER_NAME" >SERVER_NAME_GENERATED
 
-		cp -r /root/certs/pki pki
+		# Create the PKI, set up the CA, the DH params and the server certificate
+		./easyrsa init-pki
+		EASYRSA_CA_EXPIRE=3650 ./easyrsa --batch --req-cn="$SERVER_CN" build-ca nopass
 
-		# # Create the PKI, set up the CA, the DH params and the server certificate
-		# ./easyrsa init-pki
-		# ./easyrsa --batch --req-cn="$SERVER_CN" build-ca nopass
+		if [[ $DH_TYPE == "2" ]]; then
+			# ECDH keys are generated on-the-fly so we don't need to generate them beforehand
+			openssl dhparam -out dh.pem $DH_KEY_SIZE
+		fi
 
-		# # By default, dh is disabled.
-		# if [[ $DH_TYPE == "2" ]]; then
-		# 	# ECDH keys are generated on-the-fly so we don't need to generate them beforehand
-		# 	openssl dhparam -out dh.pem $DH_KEY_SIZE
-		# fi
+		EASYRSA_CERT_EXPIRE=3650 ./easyrsa --batch build-server-full "$SERVER_NAME" nopass
+		EASYRSA_CRL_DAYS=3650 ./easyrsa gen-crl
 
-		# ./easyrsa --batch build-server-full "$SERVER_NAME" nopass
-		# EASYRSA_CRL_DAYS=3650 ./easyrsa gen-crl
-
-		# case $TLS_SIG in
-		# 1)
-		# 	# Generate tls-crypt key
-		# 	openvpn --genkey --secret /etc/openvpn/tls-crypt.key
-		# 	;;
-		# 2)
-		# 	# Generate tls-auth key
-		# 	openvpn --genkey --secret /etc/openvpn/tls-auth.key
-		# 	;;
-		# esac
-		cp /root/certs/tls-crypt.key /etc/openvpn/tls-crypt.key
+		case $TLS_SIG in
+		1)
+			# Generate tls-crypt key
+			openvpn --genkey --secret /etc/openvpn/tls-crypt.key
+			;;
+		2)
+			# Generate tls-auth key
+			openvpn --genkey --secret /etc/openvpn/tls-auth.key
+			;;
+		esac
 	else
 		# If easy-rsa is already installed, grab the generated SERVER_NAME
 		# for client configs
@@ -788,16 +814,6 @@ function installOpenVPN() {
 	elif [[ $IPV6_SUPPORT == 'y' ]]; then
 		echo "proto ${PROTOCOL}6" >>/etc/openvpn/server.conf
 	fi
-	
-	# Enable multisession
-	echo "duplicate-cn" >>/etc/openvpn/server.conf
-
-    # Enable auth
-    echo "script-security 2" >>/etc/openvpn/server.conf
-    echo "auth-user-pass-verify \"/etc/openvpn/custom-scripts/client-connect.sh\" via-env" >>/etc/openvpn/server.conf
-
-	# Enable management console
-	echo "management 0.0.0.0 7505" >>/etc/openvpn/server.conf
 
 	echo "dev tun
 user nobody
@@ -814,7 +830,7 @@ ifconfig-pool-persist ipp.txt" >>/etc/openvpn/server.conf
 	1) # Current system resolvers
 		# Locate the proper resolv.conf
 		# Needed for systems running systemd-resolved
-		if grep -q "127.0.0.53" "/etc/resolv.conf" && [ -f /run/systemd/resolve/resolv.conf ]; then
+		if grep -q "127.0.0.53" "/etc/resolv.conf"; then
 			RESOLVCONF='/run/systemd/resolve/resolv.conf'
 		else
 			RESOLVCONF='/etc/resolv.conf'
@@ -971,7 +987,6 @@ verb 3" >>/etc/openvpn/server.conf
 
 		# Workaround to fix OpenVPN service on OpenVZ
 		sed -i 's|LimitNPROC|#LimitNPROC|' /etc/systemd/system/openvpn\@.service
-        sed -i 's|PrivateTmp=true|#PrivateTmp=false|' /etc/systemd/system/openvpn\@.service
 		# Another workaround to keep using /etc/openvpn/
 		sed -i 's|/etc/openvpn/server|/etc/openvpn|' /etc/systemd/system/openvpn\@.service
 
@@ -1110,11 +1125,11 @@ function newClient() {
 		cd /etc/openvpn/easy-rsa/ || return
 		case $PASS in
 		1)
-			./easyrsa --batch build-client-full "$CLIENT" nopass
+			EASYRSA_CERT_EXPIRE=3650 ./easyrsa --batch build-client-full "$CLIENT" nopass
 			;;
 		2)
 			echo "⚠️ You will be asked for the client password below ⚠️"
-			./easyrsa --batch build-client-full "$CLIENT"
+			EASYRSA_CERT_EXPIRE=3650 ./easyrsa --batch build-client-full "$CLIENT"
 			;;
 		esac
 		echo "Client $CLIENT added."
