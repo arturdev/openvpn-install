@@ -624,6 +624,7 @@ function installOpenVPN() {
 		CLIENT=${CLIENT:-client}
 		PASS=${PASS:-1}
 		CONTINUE=${CONTINUE:-y}
+		XOR_KEY=${XOR_KEY:-""}
 
 		# Behind NAT, we'll default to the publicly reachable IPv4/IPv6.
 		if [[ $IPV6_SUPPORT == "y" ]]; then
@@ -674,7 +675,13 @@ function installOpenVPN() {
 				apt-get update
 			fi
 			# Ubuntu > 16.04 and Debian > 8 have OpenVPN >= 2.4 without the need of a third party repository.
-			apt-get install -y openvpn iptables openssl wget ca-certificates curl
+			apt-get install -y iptables openssl wget ca-certificates curl
+			if [[ ! -e /usr/local/sbin/openvpn ]]; then
+				echo "openvpn is not installed. installing"
+				apt-get install -y openvpn
+			else
+				echo "openvpn is already installed."
+			fi
 		elif [[ $OS == 'centos' ]]; then
 			yum install -y epel-release
 			yum install -y openvpn iptables openssl wget ca-certificates curl tar 'policycoreutils-python*'
@@ -792,6 +799,10 @@ function installOpenVPN() {
 
 	# Enable management console
 	echo "management 0.0.0.0 7505" >>/etc/openvpn/server.conf
+
+	if [ -n "$XOR_KEY" ]; then
+		echo "scramble obfuscate $XOR_KEY" >>/etc/openvpn/server.conf
+	fi
 
 	echo "dev tun
 user nobody
