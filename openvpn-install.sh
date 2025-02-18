@@ -675,7 +675,7 @@ function installOpenVPN() {
 				apt-get update
 			fi
 			# Ubuntu > 16.04 and Debian > 8 have OpenVPN >= 2.4 without the need of a third party repository.
-			apt-get install -y iptables openssl wget ca-certificates curl
+			apt-get install -y iptables openssl wget ca-certificates curl ipset
 			if [[ ! -e /usr/local/sbin/openvpn ]]; then
 				echo "openvpn is not installed. installing"
 				apt-get install -y openvpn
@@ -994,11 +994,21 @@ verb 3" >>/etc/openvpn/server.conf
 
 	# Script to add rules
 	echo "#!/bin/sh
+ipset create banned hash:ip timeout 600 -exist
 iptables -t nat -I POSTROUTING 1 -s 10.8.0.0/24 -o $NIC -j MASQUERADE
 iptables -I INPUT 1 -i tun0 -j ACCEPT
 iptables -I FORWARD 1 -i $NIC -o tun0 -j ACCEPT
 iptables -I FORWARD 1 -i tun0 -o $NIC -j ACCEPT
-iptables -I INPUT 1 -i $NIC -p $PROTOCOL --dport $PORT -j ACCEPT" >/etc/iptables/add-openvpn-rules.sh
+iptables -I INPUT 1 -i $NIC -p $PROTOCOL --dport $PORT -j ACCEPT
+iptables -N DETECT_SCANNERS 2>/dev/null
+iptables -F DETECT_SCANNERS
+iptables -A DETECT_SCANNERS -j SET --add-set banned src --exist
+iptables -A DETECT_SCANNERS -j LOG --log-prefix \"[SCANNER DETECTED] \"
+iptables -A DETECT_SCANNERS -j DROP
+iptables -A FORWARD -m set --match-set banned src -j DROP
+iptables -A INPUT -m set --match-set banned src -j DROP
+iptables -A FORWARD -s 10.8.0.0/24 -p tcp --syn -m conntrack --ctstate NEW -m hashlimit --hashlimit-above 20/sec --hashlimit-burst 20 --hashlimit-mode srcip --hashlimit-name vpn_portscan_tcp -j DETECT_SCANNERS
+iptables -A FORWARD -s 10.8.0.0/24 -p udp -m conntrack --ctstate NEW -m hashlimit --hashlimit-above 20/sec --hashlimit-burst 20 --hashlimit-mode srcip --hashlimit-name vpn_portscan_udp -j DETECT_SCANNERS" >/etc/iptables/add-openvpn-rules.sh
 
 	if [[ $IPV6_SUPPORT == 'y' ]]; then
 		echo "ip6tables -t nat -I POSTROUTING 1 -s fd42:42:42:42::/112 -o $NIC -j MASQUERADE
